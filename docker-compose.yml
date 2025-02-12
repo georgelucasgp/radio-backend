@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  icecast:
+    container_name: icecast
+    image: moul/icecast
+    ports:
+      - "8000:8000"
+    environment:
+      - ICECAST_SOURCE_PASSWORD=hackme
+      - ICECAST_ADMIN_PASSWORD=hackme
+      - ICECAST_PASSWORD=hackme
+      - ICECAST_RELAY_PASSWORD=hackme
+    networks:
+      - radio_network
+
+  liquidsoap:
+    container_name: liquidsoap
+    image: savonet/liquidsoap:v2.2.5
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./radio.liq:/radio.liq
+      - ./sound:/sound:ro
+    command: liquidsoap /radio.liq
+    environment:
+      - ICECAST_HOST=icecast
+      - ICECAST_PORT=8000
+      - ICECAST_PASSWORD=hackme
+      - ICECAST_MOUNT=/radio.mp3
+      - ICECAST_VOICE_MOUNT=/voice.mp3
+      - ICECAST_SOURCE_PASSWORD=hackme
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Sao_Paulo
+    depends_on:
+      - icecast
+    networks:
+      - radio_network
+
+  redis:
+    container_name: redis
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - radio_network
+
+networks:
+  radio_network:
+    driver: bridge 
