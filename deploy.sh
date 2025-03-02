@@ -49,7 +49,7 @@ echo "🔍 Verificando status dos contêineres..."
 docker-compose -f docker-compose.prod.yml ps
 
 # Obter o IP público da instância EC2
-PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
 
 echo "✅ Implantação concluída com sucesso!"
 echo "📻 Rádio DoubleG está disponível em:"

@@ -7,6 +7,7 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
   WsResponse,
+  OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
@@ -16,17 +17,29 @@ import { ChatMessageDto } from './dto/chat-message.dto';
 @WebSocketGateway({
   namespace: 'chat',
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: (process.env.FRONTEND_URL || 'http://localhost:3001').split(','),
     credentials: true,
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   },
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
+{
   private readonly logger = new Logger(ChatGateway.name);
 
   @WebSocketServer()
   server: Server;
 
   constructor(private readonly chatService: ChatService) {}
+
+  afterInit() {
+    this.logger.log('WebSocket Gateway inicializado');
+    const frontendUrls = (
+      process.env.FRONTEND_URL || 'http://localhost:3001'
+    ).split(',');
+    this.logger.log(`CORS configurado para: ${frontendUrls.join(', ')}`);
+  }
 
   handleConnection(client: Socket) {
     this.logger.log(`Cliente conectado: ${client.id}`);
