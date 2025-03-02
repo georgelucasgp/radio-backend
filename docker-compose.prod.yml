@@ -1,9 +1,41 @@
 version: '3.8'
 
 services:
+  backend:
+    container_name: radio-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ICECAST_HOST=icecast
+      - ICECAST_PORT=8000
+      - ICECAST_SOURCE_USER=source
+      - ICECAST_SOURCE_PASSWORD=hackme
+      - ICECAST_MOUNT=/radio.mp3
+      - ICECAST_VOICE_MOUNT=/voice.mp3
+      - ICECAST_PASSWORD=hackme
+      - TEMP_DIR=/app/temp
+    volumes:
+      - radio_sound:/app/sound
+      - radio_temp:/app/temp
+    depends_on:
+      - redis
+      - icecast
+    networks:
+      - radio_network
+
   icecast:
     container_name: icecast
     image: moul/icecast
+    restart: always
     ports:
       - "8000:8000"
     environment:
@@ -17,11 +49,12 @@ services:
   liquidsoap:
     container_name: liquidsoap
     image: savonet/liquidsoap:v2.3.1
+    restart: always
     ports:
       - "8005:8005"
     volumes:
       - ./radio.liq:/radio.liq
-      - ./sound:/sound:ro
+      - radio_sound:/sound:ro
     command: liquidsoap /radio.liq
     environment:
       - ICECAST_HOST=icecast
@@ -41,10 +74,19 @@ services:
   redis:
     container_name: redis
     image: redis:alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
     networks:
       - radio_network
+
+volumes:
+  radio_sound:
+  radio_temp:
+  redis_data:
 
 networks:
   radio_network:

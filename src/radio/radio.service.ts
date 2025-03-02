@@ -5,41 +5,50 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ffmpeg from 'fluent-ffmpeg';
 import { ConfigService } from '@nestjs/config';
-import { AudioMetadata, QueueItem } from './types';
+import { AudioMetadata, QueueItem, QueueItemStatus } from './types';
 import * as ytdl from '@distube/ytdl-core';
-
 @Injectable()
 export class RadioService {
-  private readonly soundDir = path.join(process.cwd(), 'sound');
+  private readonly soundDirectory: string;
+  private readonly tempDirectory: string;
 
   constructor(
     @InjectQueue('radio') private readonly radioQueue: Queue<QueueItem>,
-    private configService: ConfigService,
+    private readonly configService: ConfigService,
   ) {
-    this.initializeDirectory();
-    this.initializeQueueProcessor();
+    this.soundDirectory = path.join(process.cwd(), 'sound');
+    this.tempDirectory = this.configService.get('TEMP_DIR') || './temp';
+
+    this.initializeDirectories();
+    this.setupQueueProcessor();
   }
 
-  private initializeDirectory(): void {
-    if (!fs.existsSync(this.soundDir)) {
-      fs.mkdirSync(this.soundDir, { recursive: true });
+  private initializeDirectories(): void {
+    this.ensureDirectoryExists(this.soundDirectory);
+    this.ensureDirectoryExists(this.tempDirectory);
+    this.cleanupSoundDirectory();
+  }
+
+  private ensureDirectoryExists(directory: string): void {
+    if (!fs.existsSync(directory)) {
+      fs.mkdirSync(directory, { recursive: true });
+      console.log(`Diretório criado: ${directory}`);
     }
-    this.cleanupDirectory();
   }
 
-  private cleanupDirectory(): void {
+  private cleanupSoundDirectory(): void {
     try {
-      const files = fs.readdirSync(this.soundDir);
+      const files = fs.readdirSync(this.soundDirectory);
       for (const file of files) {
-        fs.unlinkSync(path.join(this.soundDir, file));
+        fs.unlinkSync(path.join(this.soundDirectory, file));
       }
       console.log('Diretório de músicas limpo com sucesso');
     } catch (error) {
-      console.error('Erro ao limpar diretório:', error);
+      console.error('Erro ao limpar diretório de músicas:', error);
     }
   }
 
-  private cleanTitle(filename: string): string {
+  private formatTrackTitle(filename: string): string {
     return filename
       .replace(/^\d+-/, '')
       .replace(/\.[^/.]+$/, '')
@@ -49,7 +58,7 @@ export class RadioService {
       .join(' ');
   }
 
-  private async getAudioMetadata(filepath: string): Promise<AudioMetadata> {
+  private async extractAudioMetadata(filepath: string): Promise<AudioMetadata> {
     return new Promise((resolve, reject) => {
       ffmpeg.ffprobe(filepath, (err: Error | null, metadata: any) => {
         if (err) {
@@ -58,21 +67,21 @@ export class RadioService {
         }
 
         resolve({
-          title: this.cleanTitle(path.basename(filepath)),
+          title: this.formatTrackTitle(path.basename(filepath)),
           duration: metadata?.format?.duration || 0,
         });
       });
     });
   }
 
-  private waitTrackDuration(duration: number): Promise<void> {
+  private waitForTrackToFinish(durationInSeconds: number): Promise<void> {
     return new Promise<void>((resolve) => {
-      const timeout = setTimeout(resolve, duration * 1000);
+      const timeout = setTimeout(resolve, durationInSeconds * 1000);
       timeout.unref();
     });
   }
 
-  private removeTrackFile(filepath: string): void {
+  private scheduleTrackFileDeletion(filepath: string): void {
     try {
       if (fs.existsSync(filepath)) {
         setTimeout(() => {
@@ -86,18 +95,15 @@ export class RadioService {
     }
   }
 
-  private initializeQueueProcessor(): void {
+  private setupQueueProcessor(): void {
     void this.radioQueue
       .process(1, async (job: Job<QueueItem>) => {
         try {
           const track = job.data;
           console.log(`Processando: ${track.metadata.title}`);
 
-          await this.waitTrackDuration(track.metadata.duration);
-          this.removeTrackFile(track.filepath);
-
-          // Não precisa adicionar a próxima música aqui
-          // O Bull já vai processar o próximo job da fila automaticamente
+          await this.waitForTrackToFinish(track.metadata.duration);
+          this.scheduleTrackFileDeletion(track.filepath);
 
           return track;
         } catch (error) {
@@ -119,17 +125,9 @@ export class RadioService {
 
       const timestamp = Date.now();
       const filename = `${timestamp}-${videoTitle.replace(/\s+/g, '_').toLowerCase()}.mp3`;
-      const filepath = path.join(this.soundDir, filename);
+      const filepath = path.join(this.soundDirectory, filename);
 
-      await new Promise<void>((resolve, reject) => {
-        ytdl(url, {
-          filter: 'audioonly',
-          quality: 'highestaudio',
-        })
-          .pipe(fs.createWriteStream(filepath))
-          .on('finish', resolve)
-          .on('error', reject);
-      });
+      await this.downloadYoutubeAudio(url, filepath);
 
       await this.addToQueue({
         originalname: videoTitle,
@@ -145,52 +143,85 @@ export class RadioService {
     }
   }
 
+  private async downloadYoutubeAudio(
+    url: string,
+    outputPath: string,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      ytdl(url, {
+        filter: 'audioonly',
+        quality: 'highestaudio',
+      })
+        .pipe(fs.createWriteStream(outputPath))
+        .on('finish', resolve)
+        .on('error', reject);
+    });
+  }
+
   async addToQueue(file: Express.Multer.File): Promise<void> {
     try {
       const timestamp = Date.now();
-      const cleanedFilename = this.cleanTitle(file.originalname);
+      const cleanedFilename = this.formatTrackTitle(file.originalname);
       const filename = `${timestamp}-${cleanedFilename.replace(/\s+/g, '_').toLowerCase()}.mp3`;
-      const filepath = path.join(this.soundDir, filename);
+      const filepath = path.join(this.soundDirectory, filename);
 
-      fs.copyFileSync(file.path, filepath);
-      fs.unlinkSync(file.path);
+      this.saveAudioFile(file.path, filepath);
+      const metadata = await this.extractAudioMetadata(filepath);
 
-      const metadata = await this.getAudioMetadata(filepath);
-
-      // Sempre cria o item da fila
-      const queueItem: QueueItem = {
-        id: timestamp,
+      const queueItem = this.createQueueItem(
         filepath,
         filename,
-        metadata: {
-          title: cleanedFilename,
-          duration: metadata.duration,
-        },
-        status: 'waiting',
-        addedAt: new Date(),
-      };
-
-      // Verifica se há jobs ativos antes de adicionar
-      const activeJobs = await this.radioQueue.getActive();
-      if (activeJobs.length === 0) {
-        // Se não houver jobs ativos, marca como playing e adiciona
-        queueItem.status = 'playing';
-        await this.radioQueue.add(queueItem);
-        console.log(`Iniciando reprodução: ${cleanedFilename}`);
-      } else {
-        // Se já houver jobs, apenas adiciona à fila
-        await this.radioQueue.add(queueItem);
-        console.log(`Música adicionada à fila: ${cleanedFilename}`);
-      }
+        cleanedFilename,
+        metadata,
+        timestamp,
+      );
+      await this.addItemToQueue(queueItem);
     } catch (error) {
       console.error('Erro ao adicionar música:', error);
       throw error;
     }
   }
 
+  private saveAudioFile(sourcePath: string, destinationPath: string): void {
+    fs.copyFileSync(sourcePath, destinationPath);
+    fs.unlinkSync(sourcePath);
+  }
+
+  private createQueueItem(
+    filepath: string,
+    filename: string,
+    title: string,
+    metadata: AudioMetadata,
+    timestamp: number,
+  ): QueueItem {
+    return {
+      id: timestamp,
+      filepath,
+      filename,
+      metadata: {
+        title,
+        duration: metadata.duration,
+      },
+      status: QueueItemStatus.WAITING,
+      addedAt: new Date(),
+    };
+  }
+
+  private async addItemToQueue(queueItem: QueueItem): Promise<void> {
+    const activeJobs = await this.radioQueue.getActive();
+
+    if (activeJobs.length === 0) {
+      queueItem.status = QueueItemStatus.PLAYING;
+      await this.radioQueue.add(queueItem);
+      console.log(`Iniciando reprodução: ${queueItem.metadata.title}`);
+    } else {
+      await this.radioQueue.add(queueItem);
+      console.log(`Música adicionada à fila: ${queueItem.metadata.title}`);
+    }
+  }
+
   async getCurrentTrack(): Promise<QueueItem | null> {
     try {
-      // Em vez de ler arquivos, pega o job ativo do Bull
       const activeJobs = await this.radioQueue.getActive();
       return activeJobs?.[0]?.data || null;
     } catch (error) {
@@ -201,7 +232,6 @@ export class RadioService {
 
   async getQueue(): Promise<QueueItem[]> {
     try {
-      // Em vez de ler arquivos, pega os jobs em espera do Bull
       const waitingJobs = await this.radioQueue.getWaiting();
       return waitingJobs.map((job) => job.data);
     } catch (error) {
@@ -212,12 +242,7 @@ export class RadioService {
 
   async clearQueue(): Promise<void> {
     try {
-      // Limpa os arquivos físicos
-      const files = fs.readdirSync(this.soundDir);
-      for (const file of files) {
-        fs.unlinkSync(path.join(this.soundDir, file));
-      }
-      // Limpa a fila no Bull
+      this.deleteAllAudioFiles();
       await this.radioQueue.empty();
       console.log('Fila limpa com sucesso');
     } catch (error) {
@@ -226,34 +251,39 @@ export class RadioService {
     }
   }
 
-  private getLiquidsoapUrl(): string {
-    const host = this.configService.get('HOST') || 'localhost';
+  private deleteAllAudioFiles(): void {
+    const files = fs.readdirSync(this.soundDirectory);
+    for (const file of files) {
+      fs.unlinkSync(path.join(this.soundDirectory, file));
+    }
+  }
+
+  private getIcecastUrl(): string {
+    const host = this.configService.get('ICECAST_HOST') || 'localhost';
+    const port = '8005'; // Porta do harbor do Liquidsoap
     const password =
       this.configService.get('ICECAST_SOURCE_PASSWORD') || 'hackme';
-    return `http://source:${password}@${host}:8005/voice`;
+    const mount = '/voice.mp3'; // Mountpoint fixo para o harbor
+
+    return `icecast://source:${password}@${host}:${port}${mount}`;
   }
 
   private async saveTemporaryFile(
     buffer: Buffer,
     extension: string = 'webm',
   ): Promise<string> {
-    const tempDir = (this.configService.get('TEMP_DIR') as string) || './temp';
-    const tempFile = path.join(tempDir, `temp-${Date.now()}.${extension}`);
+    const tempFile = path.join(
+      this.tempDirectory,
+      `temp-${Date.now()}.${extension}`,
+    );
 
-    // Garante que o diretório temporário existe
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-
-    // Salva o arquivo temporariamente de forma síncrona
+    this.ensureDirectoryExists(this.tempDirectory);
     fs.writeFileSync(tempFile, buffer);
 
-    // Verifica se o arquivo foi salvo corretamente
     if (!fs.existsSync(tempFile) || fs.statSync(tempFile).size === 0) {
       throw new Error('Erro ao salvar arquivo temporário');
     }
 
-    // Aguarda um momento para garantir que o arquivo foi escrito completamente
     return new Promise<string>((resolve) => {
       setTimeout(() => resolve(tempFile), 100);
     });
@@ -293,50 +323,56 @@ export class RadioService {
       tempFile = await this.saveTemporaryFile(file.buffer);
       console.log('Arquivo temporário salvo:', tempFile);
 
-      // Verifica se o arquivo é válido
       const isValid = await this.verifyWebmFile(tempFile);
       if (!isValid) {
         throw new Error('Arquivo WebM inválido ou corrompido');
       }
 
-      const liquidSoapUrl = this.getLiquidsoapUrl();
-      console.log('Tentando transmitir para Liquidsoap:', liquidSoapUrl);
+      const icecastUrl = this.getIcecastUrl();
+      console.log(
+        'Enviando áudio para o harbor do Liquidsoap para mixagem:',
+        icecastUrl,
+      );
 
-      return new Promise((resolve, reject) => {
-        ffmpeg()
-          .input(tempFile)
-          .inputFormat('webm')
-          .inputOptions(['-re']) // Lê o input em tempo real
-          .outputFormat('mp3')
-          .audioCodec('libmp3lame')
-          .audioBitrate('128k')
-          .audioChannels(2)
-          .audioFrequency(44100)
-          .outputOptions(['-content_type audio/mpeg'])
-          .output(liquidSoapUrl, { end: true })
-          .on('start', (commandLine) => {
-            console.log('Comando FFmpeg:', commandLine);
-          })
-          .on('progress', (progress) => {
-            console.log('Progresso:', progress);
-          })
-          .on('end', () => {
-            console.log('Transmissão finalizada com sucesso');
-            this.cleanupFile(tempFile);
-            resolve({ success: true });
-          })
-          .on('error', (err) => {
-            console.error('Erro FFmpeg detalhado:', err);
-            this.cleanupFile(tempFile);
-            reject(new Error(`Erro na conversão: ${err.message}`));
-          })
-          .run();
-      });
+      return await this.streamAudioToIcecast(tempFile, icecastUrl);
     } catch (err) {
       if (tempFile) {
         this.cleanupFile(tempFile);
       }
       throw err;
     }
+  }
+
+  private async streamAudioToIcecast(
+    inputFile: string,
+    outputUrl: string,
+  ): Promise<{ success: boolean }> {
+    return new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(inputFile)
+        .inputFormat('webm')
+        .inputOptions(['-re']) // Lê o input em tempo real
+        .outputFormat('mp3')
+        .audioCodec('libmp3lame')
+        .audioBitrate('128k')
+        .audioChannels(2)
+        .audioFrequency(44100)
+        .outputOptions(['-content_type audio/mpeg'])
+        .output(outputUrl, { end: true })
+        .on('start', (commandLine) => {
+          console.log('Comando FFmpeg:', commandLine);
+        })
+        .on('end', () => {
+          console.log('Transmissão finalizada com sucesso');
+          this.cleanupFile(inputFile);
+          resolve({ success: true });
+        })
+        .on('error', (err) => {
+          console.error('Erro FFmpeg detalhado:', err);
+          this.cleanupFile(inputFile);
+          reject(new Error(`Erro na conversão: ${err.message}`));
+        })
+        .run();
+    });
   }
 }

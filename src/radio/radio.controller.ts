@@ -25,18 +25,22 @@ export class RadioController {
       storage: diskStorage({
         destination: './temp',
         filename: (req, file, cb) => {
-          if (!file.mimetype.match(/^audio\/(mpeg|wav|ogg|x-m4a)$/)) {
-            return cb(
-              new Error('Apenas arquivos de áudio são permitidos!'),
-              '',
-            );
-          }
           cb(null, file.originalname);
         },
       }),
+      fileFilter: (req, file, cb) => {
+        const isAudio = file.mimetype.match(/^audio\/(mpeg|wav|ogg|x-m4a)$/);
+        if (!isAudio) {
+          return cb(
+            new Error('Apenas arquivos de áudio são permitidos!'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
     }),
   )
-  async uploadFile(
+  async uploadAudioFile(
     @UploadedFile(
       new ParseFilePipe({
         validators: [
@@ -54,7 +58,14 @@ export class RadioController {
   }
 
   @Post('youtube')
-  async addFromYoutube(@Body('url') url: string) {
+  async addYoutubeTrackToQueue(@Body('url') url: string) {
+    if (!url) {
+      throw new HttpException(
+        'URL do YouTube é obrigatória',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     await this.radioService.addFromYoutube(url);
     return {
       message: 'Música do YouTube adicionada à fila com sucesso',
@@ -62,7 +73,7 @@ export class RadioController {
   }
 
   @Get('queue')
-  async getQueue(): Promise<QueueResponse> {
+  async getPlaybackQueue(): Promise<QueueResponse> {
     const current = await this.radioService.getCurrentTrack();
     const queue = await this.radioService.getQueue();
 
@@ -74,13 +85,13 @@ export class RadioController {
   }
 
   @Post('clear')
-  async clearQueue() {
+  async clearPlaybackQueue() {
     await this.radioService.clearQueue();
     return { message: 'Fila limpa com sucesso' };
   }
 
   @Get('now-playing')
-  async getCurrentTrack() {
+  async getCurrentPlayingTrack() {
     try {
       const currentTrack = await this.radioService.getCurrentTrack();
       return { track: currentTrack || null };
@@ -102,7 +113,7 @@ export class RadioController {
       },
     }),
   )
-  async streamAudio(@UploadedFile() file: Express.Multer.File) {
+  async streamAudioToIcecast(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new HttpException(
         'Nenhum arquivo de áudio recebido',
@@ -115,7 +126,7 @@ export class RadioController {
     } catch (err) {
       console.error('Erro ao processar áudio:', err);
       throw new HttpException(
-        'Erro ao processar áudio',
+        'Erro ao processar áudio para Icecast',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

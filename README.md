@@ -97,3 +97,103 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+# Rádio DoubleG - Backend
+
+Este é o backend do sistema de rádio DoubleG, que gerencia streams de áudio usando Liquidsoap e Icecast.
+
+## Implantação na AWS EC2
+
+### Pré-requisitos
+
+- Uma instância EC2 com pelo menos 2GB de RAM
+- Docker e Docker Compose instalados na instância
+- Portas 3000, 8000 e 8005 liberadas no grupo de segurança
+
+### Passos para Implantação
+
+1. **Clonar o repositório na instância EC2**
+
+```bash
+git clone <seu-repositorio>
+cd radio/backend
+```
+
+2. **Construir e iniciar os contêineres**
+
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+3. **Verificar se os serviços estão rodando**
+
+```bash
+docker-compose -f docker-compose.prod.yml ps
+```
+
+### Acessando os Serviços
+
+- **API Backend**: http://seu-ip-ec2:3000
+- **Icecast**: http://seu-ip-ec2:8000
+- **Stream de Rádio**: http://seu-ip-ec2:8000/radio.mp3
+- **Stream de Voz**: http://seu-ip-ec2:8000/voice.mp3
+
+### Gerenciamento de Arquivos
+
+Os arquivos temporários e de música são gerenciados através de volumes Docker:
+
+- `radio_sound`: Armazena os arquivos de música
+- `radio_temp`: Armazena arquivos temporários
+- `redis_data`: Armazena dados do Redis
+
+Estes volumes persistem mesmo após a reinicialização dos contêineres.
+
+### Logs e Monitoramento
+
+Para verificar os logs dos serviços:
+
+```bash
+# Logs do backend
+docker logs radio-backend
+
+# Logs do Liquidsoap
+docker logs liquidsoap
+
+# Logs do Icecast
+docker logs icecast
+```
+
+### Segurança
+
+**Importante**: Antes de implantar em produção, altere todas as senhas padrão no arquivo `docker-compose.prod.yml`:
+
+- `ICECAST_SOURCE_PASSWORD`
+- `ICECAST_ADMIN_PASSWORD`
+- `ICECAST_PASSWORD`
+- `ICECAST_RELAY_PASSWORD`
+
+### Backup
+
+Para fazer backup dos volumes:
+
+```bash
+docker run --rm -v radio_sound:/source -v /path/to/backup:/backup alpine tar -czf /backup/radio_sound_backup.tar.gz -C /source .
+docker run --rm -v redis_data:/source -v /path/to/backup:/backup alpine tar -czf /backup/redis_data_backup.tar.gz -C /source .
+```
+
+## Desenvolvimento Local
+
+Para desenvolvimento local, use o arquivo `docker-compose.yml` padrão:
+
+```bash
+docker-compose up -d
+npm run start:dev
+```
+
+## Estrutura do Projeto
+
+- `src/`: Código-fonte do backend NestJS
+- `radio.liq`: Configuração do Liquidsoap
+- `docker-compose.yml`: Configuração para desenvolvimento
+- `docker-compose.prod.yml`: Configuração para produção
+- `Dockerfile`: Configuração para construir a imagem do backend

@@ -3,12 +3,18 @@ export interface AudioMetadata {
   duration: number;
 }
 
+export enum QueueItemStatus {
+  WAITING = 'waiting',
+  PLAYING = 'playing',
+  FINISHED = 'finished',
+}
+
 export interface QueueItem {
   id: number;
   filepath: string;
   filename: string;
   metadata: AudioMetadata;
-  status: 'waiting' | 'playing' | 'finished';
+  status: QueueItemStatus;
   addedAt: Date;
 }
 
