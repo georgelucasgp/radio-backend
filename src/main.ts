@@ -7,23 +7,25 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   // Configuração do CORS
-  const frontendUrls = (
-    process.env.FRONTEND_URL || 'http://localhost:3001'
-  ).split(',');
+  const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3001';
 
-  logger.log(
-    `Configurando CORS para os seguintes domínios: ${frontendUrls.join(', ')}`,
-  );
+  logger.log(`Configurando CORS para o domínio: ${allowedOrigin}`);
 
   app.enableCors({
     origin: (origin, callback) => {
-      // Permitir requisições sem origem (como mobile apps ou curl)
+      // Permitir requisições sem origem (como mobile apps ou curl) apenas em desenvolvimento
       if (!origin) {
-        return callback(null, true);
+        if (process.env.NODE_ENV !== 'production') {
+          return callback(null, true);
+        }
+        return callback(new Error('Origem não permitida pelo CORS'), false);
       }
 
-      // Verificar se a origem está na lista de domínios permitidos
-      if (frontendUrls.some((url) => origin.startsWith(url))) {
+      // Verificar se a origem é exatamente a permitida
+      if (
+        origin === allowedOrigin ||
+        origin === allowedOrigin.replace(/\/$/, '')
+      ) {
         return callback(null, true);
       }
 

@@ -17,7 +17,7 @@ import { ChatMessageDto } from './dto/chat-message.dto';
 @WebSocketGateway({
   namespace: 'chat',
   cors: {
-    origin: (process.env.FRONTEND_URL || 'http://localhost:3001').split(','),
+    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
     credentials: true,
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -35,14 +35,27 @@ export class ChatGateway
 
   afterInit() {
     this.logger.log('WebSocket Gateway inicializado');
-    const frontendUrls = (
-      process.env.FRONTEND_URL || 'http://localhost:3001'
-    ).split(',');
-    this.logger.log(`CORS configurado para: ${frontendUrls.join(', ')}`);
+    const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3001';
+    this.logger.log(`CORS configurado para: ${allowedOrigin}`);
   }
 
   handleConnection(client: Socket) {
     this.logger.log(`Cliente conectado: ${client.id}`);
+
+    // Verificar a origem da conexão
+    const origin = client.handshake.headers.origin;
+    const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3001';
+
+    if (
+      process.env.NODE_ENV === 'production' &&
+      origin !== allowedOrigin &&
+      origin !== allowedOrigin.replace(/\/$/, '') &&
+      !origin?.startsWith('http://localhost')
+    ) {
+      this.logger.warn(`Conexão bloqueada de origem não permitida: ${origin}`);
+      client.disconnect();
+      return;
+    }
 
     const recentMessages = this.chatService.getRecentMessages();
     client.emit('recent-messages', recentMessages);

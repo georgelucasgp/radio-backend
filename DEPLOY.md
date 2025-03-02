@@ -29,9 +29,11 @@ Este guia explica como configurar e fazer deploy do backend da Rádio DoubleG em
 
    Atualize as seguintes variáveis:
    - `PORT`: Porta em que o backend rodará (padrão: 3000)
-   - `FRONTEND_URL`: URL(s) do frontend, separadas por vírgula (ex: https://radio-doubleg.vercel.app,https://www.radio-doubleg.com)
+   - `FRONTEND_URL`: URL do frontend (ex: https://radiodoubleg.vercel.app)
    - `ICECAST_SOURCE_PASSWORD`: Senha para transmissão (use uma senha forte)
    - `ICECAST_PASSWORD`: Senha de administração do Icecast (use uma senha forte)
+
+   **Importante**: A configuração de CORS foi ajustada para aceitar apenas um domínio específico. Certifique-se de que o valor de `FRONTEND_URL` corresponda exatamente ao domínio do seu frontend, incluindo o protocolo (https://) e sem barra no final.
 
 ## Deploy com Docker
 
@@ -184,7 +186,16 @@ Para atualizar o backend:
 Se encontrar problemas com CORS:
 
 1. Verifique se a variável `FRONTEND_URL` no arquivo `.env` está configurada corretamente
-2. Reinicie o backend:
+   - Deve ser exatamente igual ao domínio do frontend (ex: https://radiodoubleg.vercel.app)
+   - Não deve ter barra no final
+   - Deve incluir o protocolo (https://)
+
+2. Verifique os logs do backend para mensagens de erro relacionadas ao CORS:
+   ```bash
+   docker logs radio-backend | grep -i cors
+   ```
+
+3. Reinicie o backend:
    ```bash
    docker-compose -f docker-compose.prod.yml restart radio-backend
    ```
