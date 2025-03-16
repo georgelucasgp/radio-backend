@@ -23,6 +23,7 @@ services:
       - ICECAST_VOICE_MOUNT=/voice.mp3
       - ICECAST_PASSWORD=hackme
       - TEMP_DIR=/app/temp
+      - FRONTEND_URL=https://radiodoubleg.vercel.app
     volumes:
       - radio_sound:/app/sound
       - radio_temp:/app/temp
