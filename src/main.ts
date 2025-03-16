@@ -1,54 +1,88 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
+import { json } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
 
-  // Configuração do CORS
-  const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3001';
+  // Configurar limites de tamanho do payload
+  app.use(json({ limit: '50mb' }));
 
-  logger.log(`Configurando CORS para o domínio: ${allowedOrigin}`);
+  // Configuração do CORS
+  const allowedOrigins = (
+    process.env.ALLOWED_ORIGINS ||
+    process.env.FRONTEND_URL ||
+    'http://localhost:3001'
+  )
+    .split(',')
+    .map((origin) => origin.trim());
+
+  logger.log(
+    `Configurando CORS para os domínios: ${allowedOrigins.join(', ')}`,
+  );
 
   app.enableCors({
     origin: (origin, callback) => {
-      // Permitir requisições sem origem (como mobile apps ou curl) apenas em desenvolvimento
+      // Permitir requisições sem origem em desenvolvimento
       if (!origin) {
         if (process.env.NODE_ENV !== 'production') {
           return callback(null, true);
         }
+        logger.warn('Requisição sem origem bloqueada em produção');
         return callback(new Error('Origem não permitida pelo CORS'), false);
       }
 
-      // Verificar se a origem é exatamente a permitida
-      if (
-        origin === allowedOrigin ||
-        origin === allowedOrigin.replace(/\/$/, '')
-      ) {
+      // Remover possível barra no final da origem
+      const cleanOrigin = origin.replace(/\/$/, '');
+
+      // Verificar se a origem está na lista de permitidas
+      const isAllowed = allowedOrigins.some((allowed) => {
+        const cleanAllowed = allowed.replace(/\/$/, '');
+        return cleanOrigin === cleanAllowed;
+      });
+
+      if (isAllowed) {
+        logger.log(`Origem permitida: ${origin}`);
         return callback(null, true);
       }
 
-      // Em ambiente de desenvolvimento, permitir localhost
+      // Em desenvolvimento, permitir localhost
       if (
         process.env.NODE_ENV !== 'production' &&
-        (origin.startsWith('http://localhost') ||
-          origin.startsWith('http://127.0.0.1'))
+        (cleanOrigin.startsWith('http://localhost') ||
+          cleanOrigin.startsWith('http://127.0.0.1'))
       ) {
+        logger.log(`Origem local permitida em desenvolvimento: ${origin}`);
         return callback(null, true);
       }
 
-      logger.warn(`Bloqueando requisição de origem não permitida: ${origin}`);
+      logger.warn(`Origem bloqueada: ${origin}`);
       callback(new Error('Origem não permitida pelo CORS'), false);
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'Access-Control-Request-Method',
+      'Access-Control-Request-Headers',
+    ],
+    exposedHeaders: ['Content-Disposition'],
     credentials: true,
     maxAge: 86400, // 24 horas em segundos
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   });
 
   const port = process.env.PORT ?? 3000;
-  await app.listen(port);
-  logger.log(`Aplicação rodando na porta ${port}`);
+  const host = process.env.HOST ?? '0.0.0.0';
+
+  await app.listen(port, host);
+  logger.log(`Aplicação rodando em: http://${host}:${port}`);
 }
+
 bootstrap();
