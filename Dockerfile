@@ -1,35 +1,42 @@
-FROM node:20-bullseye-slim
+# Build stage
+FROM node:20-bullseye-slim AS builder
 
-# Definir diretório de trabalho
 WORKDIR /app
 
-# Instalar dependências do sistema, incluindo ffmpeg
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    python3 \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Instalar pnpm globalmente
-RUN npm install -g pnpm@latest
-
-# Copiar arquivos de dependências
-COPY package.json pnpm-lock.yaml ./
+# Instalar pnpm
+RUN npm install -g pnpm
 
 # Instalar dependências
-RUN pnpm install --frozen-lockfile
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install
 
-# Copiar o código-fonte
+# Copiar código e buildar
 COPY . .
+RUN pnpm run build
+
+# Production stage
+FROM node:20-bullseye-slim
+
+WORKDIR /app
+
+# Copiar package.json e pnpm-lock.yaml
+COPY package.json pnpm-lock.yaml ./
+
+# Instalar apenas dependências de produção
+RUN npm install -g pnpm && pnpm install --prod
+
+# Copiar build e node_modules
+COPY --from=builder /app/dist ./dist
+
+# Instalar ffmpeg
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 # Criar diretórios necessários
 RUN mkdir -p sound temp
 
-# Compilar o projeto
-RUN pnpm run build
-
-# Expor a porta usada pelo NestJS
 EXPOSE 3000
 
-# Comando para iniciar a aplicação
-CMD ["pnpm", "run", "start:prod"] 
+# Usar node diretamente
+CMD ["node", "dist/main"] 
