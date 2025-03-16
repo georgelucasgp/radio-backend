@@ -25,9 +25,8 @@ COPY package.json pnpm-lock.yaml ./
 # Instalar apenas dependências de produção
 RUN npm install -g pnpm && pnpm install --prod
 
-# Copiar build, node_modules e .env
+# Copiar build, node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/.env ./.env
 
 # Instalar ffmpeg
 RUN apt-get update && apt-get install -y \
