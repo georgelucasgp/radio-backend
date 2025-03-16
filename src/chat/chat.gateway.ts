@@ -17,10 +17,10 @@ import { ChatMessageDto } from './dto/chat-message.dto';
 @WebSocketGateway({
   namespace: 'chat',
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: (process.env.ALLOWED_ORIGINS || 'http://localhost:3001')
+      .split(',')
+      .map((origin) => origin.trim()),
     credentials: true,
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   },
 })
 export class ChatGateway

@@ -24,6 +24,7 @@ services:
       - ICECAST_PASSWORD=hackme
       - TEMP_DIR=/app/temp
       - FRONTEND_URL=https://radiodoubleg.vercel.app
+      - ALLOWED_ORIGINS=https://radiodoubleg.vercel.app,http://localhost:3001,http://localhost:3000
     volumes:
       - radio_sound:/app/sound
       - radio_temp:/app/temp
