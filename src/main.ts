@@ -23,7 +23,7 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin: allowedOrigins,
+    origin: '*',
     credentials: true,
     maxAge: 86400,
   });
